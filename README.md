@@ -64,11 +64,29 @@ For scale: rerunning 512 with different noise moves it by 1.0, and the arm's typ
 
 Caveats: sim data, and these episodes were in the training set.
 
+## int8 vision tower, still 512 px
+
+`vision_int8.py` exports the vision tower + connector to ONNX, quantizes it three ways with onnxruntime (calibration on two episodes not in the test set), swaps each back in for `embed_image` and reruns the same 31-frame action check. Timing is onnxruntime on the M1 CPU, so it doesn't compare with the MPS numbers above.
+
+| vision tower | vs recorded | vs torch output | ms / image (CPU) | size |
+|---|---|---|---|---|
+| torch fp32 | 1.16 | 0 | | |
+| ONNX fp32 | 1.16 | 0.05 | 2785 | 393 MB |
+| int8 dynamic (weights only) | 1.32 | 0.82 | 1384 | 102 MB |
+| int8 static, everything (QDQ) | 12.36 | 12.24 | 1421 | 100 MB |
+| int8 static, MatMul/Conv only | 2.63 | 2.43 | 2534 | 356 MB |
+
+- Weight-only int8 is close to free: 2x faster on CPU, 4x smaller, error within the noise band (~1.0).
+- Full static int8 breaks it the same way downscaling did. Quantizing activations is the problem.
+- Keeping softmax, layernorm, GELU and the adds in float gets most of it back (2.6), but onnxruntime then runs it slower than fp32 because of all the QDQ pairs.
+- The RK3588 NPU wants full int8, so the next job is finding which activations can't take int8 (per-layer sensitivity) and keeping only those in fp16.
+
 ## Todo
 
 - ~~encode all cameras in one batched pass~~ done, no real gain on M1 (may still matter on the NPU)
 - ~~check how much 384 / 256 px changes the actions~~ done, breaks the policy
 - fine-tune at 256 px (free Colab/Kaggle GPU) and see how much comes back
-- keep 512 but make the vision tower cheaper: int8, which is what the RK3588 NPU wants anyway
+- ~~int8 vision tower at 512~~ weight-only works, full static int8 breaks it
+- per-layer sensitivity: which activations can't go int8
 - reuse vision work across overlapping chunks
 - export the vision tower to ONNX, then RKNN for the RK3588 NPU
