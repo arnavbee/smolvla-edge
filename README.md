@@ -50,11 +50,25 @@ python bench.py --device mps --dtype float16 --res 256
 | 384 px | 970 ms | 502 ms | 94 ms |
 | 256 px | 632 ms | 210 ms | 62 ms |
 
-The model was trained at 512, so smaller inputs probably hurt the actions. Haven't checked that yet.
+### Does it still pick the right moves?
+
+No. `res_check.py` runs a fine-tuned SmolVLA ([edge-inference/smolvla-so101-pick-orange](https://huggingface.co/edge-inference/smolvla-so101-pick-orange)) on recorded frames from its dataset (LightwheelAI/leisaac-pick-orange, 3 episodes, 31 frames), same noise at every size, and compares the 50-step chunk to the recorded actions. Mean abs error, joint units:
+
+| input | vs recorded | vs 512 output |
+|---|---|---|
+| 512 px | 1.2 | 0 |
+| 384 px | 10.4 | 10.3 |
+| 256 px | 11.7 | 11.5 |
+
+For scale: rerunning 512 with different noise moves it by 1.0, and the arm's typical motion over 50 steps is 17.4. So at 384 or 256 the error is most of the movement. Naive downscaling is out.
+
+Caveats: sim data, and these episodes were in the training set.
 
 ## Todo
 
 - ~~encode all cameras in one batched pass~~ done, no real gain on M1 (may still matter on the NPU)
-- check how much 384 / 256 px changes the actions on real LeRobot frames
+- ~~check how much 384 / 256 px changes the actions~~ done, breaks the policy
+- fine-tune at 256 px (free Colab/Kaggle GPU) and see how much comes back
+- keep 512 but make the vision tower cheaper: int8, which is what the RK3588 NPU wants anyway
 - reuse vision work across overlapping chunks
 - export the vision tower to ONNX, then RKNN for the RK3588 NPU
