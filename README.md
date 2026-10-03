@@ -26,9 +26,35 @@ python bench.py --device mps --dtype float16 --cams 3
 - Casting the policy to fp16/bf16 crashes on MPS. `denoise_step` casts to float32 right before `action_out_proj` (`modeling_smolvla.py:808`) and the Euler loop keeps `x_t` in float32, so the half-precision linears get float32 input. `bench.py` keeps the four action-side linears in fp32 to get around it.
 - At 30 Hz a 50-action chunk lasts ~1.67 s, so 3 cams on the M1 barely keeps up. An RK3588 won't without changes.
 
+## Batching cameras and image size
+
+`fast.py` has `batch_vision()`, which sends all cameras through the vision encoder in one pass. Output matches the stock model (max diff ~1e-6 in fp32) but it's barely faster: 1555 ms vs 1570 ms for 3 cams. At 512 px each image is already 1024 patches, so the GPU is full with one image and batching doesn't help.
+
+Image size is what moves it. Vision encoder alone, one image, fp16:
+
+| input | time | tokens to the VLM |
+|---|---|---|
+| 512 px | 354 ms | 64 |
+| 384 px | 157 ms | 36 |
+| 256 px | 53 ms | 16 |
+
+Full chunk, 3 cams, fp16:
+
+```
+python bench.py --device mps --dtype float16 --res 256
+```
+
+| input | chunk | vision | prefix |
+|---|---|---|---|
+| 512 px | 1570 ms | 1020 ms | 141 ms |
+| 384 px | 970 ms | 502 ms | 94 ms |
+| 256 px | 632 ms | 210 ms | 62 ms |
+
+The model was trained at 512, so smaller inputs probably hurt the actions. Haven't checked that yet.
+
 ## Todo
 
-- encode all cameras in one batched pass
-- fewer vision tokens, then check what it costs on a LeRobot dataset
+- ~~encode all cameras in one batched pass~~ done, no real gain on M1 (may still matter on the NPU)
+- check how much 384 / 256 px changes the actions on real LeRobot frames
 - reuse vision work across overlapping chunks
 - export the vision tower to ONNX, then RKNN for the RK3588 NPU
