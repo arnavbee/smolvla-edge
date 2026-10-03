@@ -4,7 +4,7 @@ Trying to get SmolVLA (`lerobot/smolvla_base`, 450M) running in real time on che
 
 ## Numbers so far
 
-M1 MacBook Air, 8 GB, MPS. One chunk = 50 actions, 10 denoise steps, images padded to 512x512.
+M1 Mac, 8 GB, MPS. One chunk = 50 actions, 10 denoise steps, images padded to 512x512.
 
 ```
 python bench.py --device mps --dtype float16 --cams 3
