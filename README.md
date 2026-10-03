@@ -81,12 +81,55 @@ Caveats: sim data, and these episodes were in the training set.
 - Keeping softmax, layernorm, GELU and the adds in float gets most of it back (2.6), but onnxruntime then runs it slower than fp32 because of all the QDQ pairs.
 - The RK3588 NPU wants full int8, so the next job is finding which activations can't take int8 (per-layer sensitivity) and keeping only those in fp16.
 
+## Which activations can't take int8?
+
+The vision tower has 492 activation Q/DQ pairs in the static model. Dropping a pair leaves that tensor in float while the weights stay int8, so you can test any mix without recalibrating. `layer_sens.py` sweeps them, scored first by how far the tower output moves from fp32 on held-out images (relative error), then by the same 31-frame action check as above.
+
+One block at a time, only that block's activations int8 (weight-only on its own is 0.29):
+
+| block | L00 | L01-L04 | L05-L08 | L09 | L10 | L11 |
+|---|---|---|---|---|---|---|
+| tower error | 0.46 | 0.30-0.33 | 0.55-0.65 | 0.50 | 1.63 | 0.79 |
+
+Layer 10 on its own does as much damage as quantizing everything (1.62). But taking it out isn't enough, because most of the other blocks also hurt a bit and it adds up.
+
+Action check, mean abs error vs recorded (torch fp32 is 1.16, weight-only int8 is 1.32):
+
+| activations kept in float | float / 492 | vs recorded | vs torch |
+|---|---|---|---|
+| none (full static) | 0 | 12.36 | 12.24 |
+| top 8 most sensitive tensor roles | 85 | 3.75 | - |
+| layers 10, 11 | 80 | 20.44 | 20.58 |
+| layers 10, 11 + residual adds | 100 | 4.98 | 4.73 |
+| layers 5-11 | 280 | 3.95 | 3.74 |
+| everything except layers 1-4 | 321 | 2.80 | 2.46 |
+
+`layer_mix.py` has the block mixes. Results in `layer_sens.json` and `layer_mix.json`.
+
+- Nothing gets close to weight-only. Even with only layers 1-4 in int8 the error doubles.
+- Floating layers 10 and 11 made it worse (20.4). The tower error went down (0.77) but the actions got worse, so tower error is a bad stand-in for the action check. Always run the actions.
+- So it's not a few bad layers. Plain min/max int8 on activations is too coarse almost everywhere in this tower.
+
+CPU speed, one 512 px image, onnxruntime, M1 idle (the table further up was timed with other jobs running, so it's slower):
+
+| vision tower | ms / image | size |
+|---|---|---|
+| ONNX fp32 | 1328 | 393 MB |
+| int8 weights only | 666 | 102 MB |
+| int8 static, everything | 653 | 100 MB |
+| mixed, layers 1-4 int8 | 853 | 100 MB |
+
+Full int8 isn't faster than weight-only on CPU anyway. It only matters for the NPU, which wants int8 activations.
+
+Next things to try for the NPU: 16-bit activations (RKNN has 16-bit modes, need to check which run on the RK3588), better calibration (percentile or entropy instead of min/max, needs a machine with more than 8 GB), or SmoothQuant to move the outliers into the weights.
+
 ## Todo
 
 - ~~encode all cameras in one batched pass~~ done, no real gain on M1 (may still matter on the NPU)
 - ~~check how much 384 / 256 px changes the actions~~ done, breaks the policy
 - fine-tune at 256 px (free Colab/Kaggle GPU) and see how much comes back
 - ~~int8 vision tower at 512~~ weight-only works, full static int8 breaks it
-- per-layer sensitivity: which activations can't go int8
+- ~~per-layer sensitivity: which activations can't go int8~~ done, no small set; it's spread across the tower
+- w8a16 or better calibration for the activations
 - reuse vision work across overlapping chunks
 - export the vision tower to ONNX, then RKNN for the RK3588 NPU
