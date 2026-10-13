@@ -33,13 +33,21 @@ cams = [k.split(".")[-1] for k in cfg.image_features]  # front, wrist
 
 
 def frames_at(path, idx):
-    want, out = set(idx), {}
+    if not idx:
+        return {}
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{path}: no video for this episode, cannot sample its frames")
+    want, last, out = set(idx), max(idx), {}
     with av.open(path) as c:
         for i, f in enumerate(c.decode(video=0)):
             if i in want:
                 out[i] = torch.from_numpy(f.to_ndarray(format="rgb24")).permute(2, 0, 1).float() / 255
-            if i > max(idx):
+            if i >= last:
                 break
+    missing = sorted(want - set(out))
+    if missing:
+        raise ValueError(f"{path}: only {i + 1} frames decoded, missing frame(s) {missing[:5]} "
+                         f"that the parquet has rows for; the video is shorter than the episode")
     return out
 
 
@@ -57,6 +65,9 @@ for pqf in sorted(glob.glob(os.path.join(args.data, "ep*.parquet"))):
     t = pq.read_table(pqf).to_pydict()
     state, action = np.array(t["observation.state"]), np.array(t["action"])
     idx = list(range(0, len(action) - cfg.chunk_size, args.every))
+    if not idx:
+        print(f"skip {ep}: {len(action)} steps is shorter than one {cfg.chunk_size}-action chunk", flush=True)
+        continue
     imgs = {c: frames_at(os.path.join(args.data, f"{ep}_{c}.mp4"), idx) for c in cams}
     for i in idx:
         obs = {"observation.state": torch.tensor(state[i], dtype=torch.float32), "task": args.task}
