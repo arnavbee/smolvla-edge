@@ -286,6 +286,11 @@ for n, (obs, truth, fid) in enumerate(samples("ep*.parquet", args.every)):
         row[f"err_top{k}"] = float(np.abs(a - truth).mean())
     rows.append(row)
     print(json.dumps(row), flush=True)
+if not rows:
+    raise SystemExit(f"no frames sampled from {args.data!r}: nothing to average, so the "
+                     f"numbers below would all be nan. Check --data points at the episode "
+                     f"parquets and that --every ({args.every}) is smaller than an episode "
+                     f"minus one {cfg.chunk_size}-action chunk.")
 res["actions"] = {c: round(float(np.mean([r[c] for r in rows])), 3) for c in rows[0] if c != "frame"}
 res["action_rows"] = rows
 save()

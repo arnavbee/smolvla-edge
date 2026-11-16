@@ -184,6 +184,11 @@ for obs, truth, fid in samples("ep*.parquet", args.every):
     rows.append(row)
     print(json.dumps(row), flush=True)
 
+if not rows:
+    raise SystemExit(f"no frames sampled from {args.data!r}: nothing to average, so the "
+                     f"numbers below would all be nan. Check --data points at the episode "
+                     f"parquets and that --every ({args.every}) is smaller than an episode "
+                     f"minus one {cfg.chunk_size}-action chunk.")
 summary = {k: round(float(np.mean([r[k] for r in rows])), 3) for k in rows[0] if k != "frame"}
 summary["frames"] = len(rows)
 print("SUMMARY", json.dumps({"accuracy": summary, "speed": speed}, indent=2))

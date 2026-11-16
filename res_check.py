@@ -90,6 +90,11 @@ for pqf in sorted(glob.glob(os.path.join(args.data, "ep*.parquet"))):
         rows.append(row)
         print(json.dumps(row), flush=True)
 
+if not rows:
+    raise SystemExit(f"no frames sampled from {args.data!r}: nothing to average, so the "
+                     f"numbers below would all be nan. Check --data points at the episode "
+                     f"parquets and that --every ({args.every}) is smaller than an episode "
+                     f"minus one {cfg.chunk_size}-action chunk.")
 summary = {"frames": len(rows), "reseed_vs_ref": float(np.mean([r["reseed_vs_ref"] for r in rows]))}
 for r in sizes:
     summary[f"err_{r}"] = float(np.mean([x[f"err_{r}"] for x in rows]))
